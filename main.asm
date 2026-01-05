@@ -12,14 +12,16 @@ RESET       mov.w   #0280h,SP               ; Initialize stackpointer
 StopWDT     mov.w   #WDTPW+WDTHOLD,&WDTCTL  ; Stop WDT
 
 SETUP:
-    bis.b #BUTALL, &P1REN ; enable buttons
-    bis.b #BUTALL, &P1OUT ; button presses h -> l 
+    bic.b #0xFF, &P1IE    ; disable all interrupts during config
+    bis.b #0xff, &P1REN ; enable buttons resistors for stop floating
+    bis.b #0xff, &P1OUT ; button presses h -> l, pull up all of them
     bis.b #LEDALL, &P2DIR   ; set leds as output
     bic.b #LEDALL, &P2OUT   ; Ensure all are OFF initially
 
     bis.w #GIE, SR ; enable interrupts
-    bis.b #BUT0|BUT1|BUT2|BUT3, &P1IES ; buttons interrupts from H to L
-    bis.b #BUT0|BUT1|BUT2|BUT3, &P1IE  ; enable button interrupts
+    bis.b #BUTGAME, &P1IES ; buttons interrupts from H to L
+    bic.b #0xFF, &P1IFG ; clear interrrupts
+    bis.b #BUTGAME, &P1IE  ; enable button interrupts
 
 ;------------------------------------------------------------------------------
 ;           MAIN LOOP
@@ -34,44 +36,46 @@ wait:
 MAINLOOP:
     call #GEN_RANDOM ; create random array
     call #SHOW_LEVEL 
-    mov.b #ON, &STATE ; set game state
-PLAYER_TURN:
-    cmp #ON, &STATE
-    jz PLAYER_TURN ; player still playing
+    mov.b #PLAYER_TURN, &STATE ; set game state
+    mov.w #0, r11 ; set players progression
+PLAYER_TURN_STATE:
+    cmp #PLAYER_TURN, &STATE
+    jz PLAYER_TURN_STATE ; player still playing
     
     cmp #WIN, &STATE 
-    jz WIN ; player passed the level
+    jz WIN_STATE ; player passed the level
 
     cmp #LOSE, &STATE 
-    jz LOSE ; player passed the level
+    jz LOSE_STATE ; player failed the level
  
-EGG:
+EGG_STATE:
     push r12 ; corrupt stack >w<
     ret
 
-
-LOSE:
+LOSE_STATE:
     ; do smth
     bic.w #GIE, SR ; disable interrupts
-    jmp LOSE
+    jmp LOSE_STATE
 
-WIN:
+WIN_STATE:
     inc.w &LEVEL ; increnent level
     jmp MAINLOOP ; continue 
+
+; functions
 
 SHOW_LEVEL:
     mov.w #ORDER, r11
     mov.w &LEVEL, r5
-    inc.w r5 ; do at least once
-.SHOW_LEVEL.loop:
-    mov.w @r11+,r13 ; get current and increment pointer
+   
+.SHOW_LEVEL_loop:
+    mov.w @r11+, r13 ; get current and increment pointer
     ; show the generated lights
     bis.b BITLEDTABLE(r13), &P2OUT
     call #DELAY
     bic.b #LEDALL, &P2OUT  ; turn off
 
     dec r5
-    jn .SHOW_LEVEL.loop ; return if -1 (flowed)
+    jge .SHOW_LEVEL_loop ; return if -1 (flowed) not negative
     ret
 
 GEN_RANDOM:
@@ -90,16 +94,17 @@ GEN_RANDOM:
     mov.w r13,ORDER(r11)
     ret                         ; Return to caller
     
-SHR: 
+SHR: ; r12 >>= r5
     rra.w r12
     dec.w r5
     jnz SHR
     ret 
-SHL: 
+SHL: ; r12 <<= r5
     rla.w r12
     dec.w r5
     jnz SHL
     ret
+
 DELAY: 
     push r5
     xor.w r5,r5
@@ -113,21 +118,41 @@ DELAY:
     ret
 
 ; BUTTON ISR
-p1_ISR: 
-    
+p1_ISR: ; r11 = progression (current led/button/whatever) points to ORDER+index
+    bic.b #0xff, &P1IFG ; clear IF for next interrupt
+    mov.b &P1IN,r5 ; current button
+    mov.b ORDER(r11),r6
+    mov.b BITBUTTABLE(r6),r6 ; needed button
 
-    bic.b #00001000b, &P1IFG ; clear IF for next interrupt
+    cmp.b r6,r5 ; compare
+    jnz .isr_false
+.isr_correct
+    
+    cmp.w &LEVEL,r11
+    jnz .isr_done
+.isr_correct_win
+    mov.w #WIN,&STATE
+    jmp .isr_done
+.isr_false
+    mov.w #LOSE,&STATE
+    jmp .isr_done
+
+.isr_egg ; maybe ?
+    jmp .isr_done
+.isr_done
+    inc r11
     reti
 ;------------------------------------------------------------------------------
 ;           data
 ;------------------------------------------------------------------------------
+    
 .data
 STATE:
-    .byte 0
+    .word 0
 LEVEL:
     .word 0
 ORDER:
-    .skip 32 ,0xff
+    .space 32
 
 ; DEFINE LED CONSTANTS 
 LED0    .equ    0x0001
@@ -142,11 +167,12 @@ BUT2    .equ    0x0008
 BUT3    .equ    0x0010
 BUTONB  .equ    0x0004
 BUTALL  .equ    0x001f
+BUTGAME .equ    0x001b
 ; DEFINE GAME STATES
-ON      .equ    0
-WIN     .equ    1
-LOSE    .equ    2
-EGG     .equ    3
+PLAYER_TURN     .equ    0
+WIN             .equ    1
+LOSE            .equ    2
+EGG             .equ    3
 
 BITLEDTABLE: .word 0x0102,0x0408 ; convert table for led: int to pin
 BITBUTTABLE: .word 0x0102,0x0810 ; convert table for buttons: int to pin
