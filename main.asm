@@ -176,6 +176,7 @@ SHL:
     ret
 INT2PIN: ; r6 => r6
     and.w #0x03,r6
+    rla.w r6
     add.w r6,pc
     jmp .case1
     jmp .case2
@@ -314,3 +315,4 @@ EGG             .equ    3
             .sect   ".reset"                ; MSP430 RESET Vector
             .short  RESET                   ;
             .end
+
