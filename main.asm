@@ -104,7 +104,7 @@ SHOW_LEVEL:
     mov.w &LEVEL,r5
 .SHOW_LEVEL_loop:
     mov.b 0(r11),r6
-    call #INT2PIN
+    ;call #INT2PIN
     bis.b r6, &P2OUT    
 
     inc.w r11
@@ -122,11 +122,12 @@ SHOW_LEVEL:
     ret
 
 GEN_RANDOM:
-
+    push r6
     push r11
     push r12
     push r5
     push r13
+    
 ; --- (Seed in RAM) ---
     mov.w &SEED, r12       ; Load seed from memory
     mov.w #ORDER,r11
@@ -149,9 +150,10 @@ GEN_RANDOM:
     call #SHR            ; r13 = seed >> 8
     xor.w r13, r12        ; seed ^= (seed >> 8)
 ; save the value
-    mov.w r12,r13
-    and.w #0x03,r13
-    mov.b r13,0(r11)
+    mov.w r12,r6
+    and.w #0x03,r6
+    call #INT2PIN
+    mov.b r6,0(r11)
     inc.w r11
     cmp.w #ORDER+64,r11
     jne .GEN_RANDOM_loop
@@ -161,6 +163,7 @@ GEN_RANDOM:
     pop r5
     pop r12
     pop r11
+    pop r6
     ret                         ; Return to caller
 
 SHR: ; r12 >>= r5
